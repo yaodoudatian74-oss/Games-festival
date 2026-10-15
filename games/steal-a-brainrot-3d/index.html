@@ -13,7 +13,10 @@
   #hud { left: 12px; top: 12px; font-size: 15px; line-height: 1.7; min-width: 230px; }
   #hud b { color: #ffe066; }
   #hud .warn { color: #ff8a8a; font-weight: 700; }
-  #help { right: 12px; bottom: 12px; font-size: 13px; line-height: 1.6; max-width: 340px; }
+  #help { right: 12px; bottom: 56px; font-size: 13px; line-height: 1.6; max-width: 340px; display: none; }
+  #help.show { display: block; }
+  #helpBtn { position: fixed; right: 12px; bottom: 12px; width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 18px; font-weight: 700; cursor: pointer; display: none; }
+  #helpBtn.show { display: block; }
   #prompt { left: 50%; bottom: 96px; transform: translateX(-50%); font-size: 17px; font-weight: 700; display: none; white-space: nowrap; }
   #bar { left: 50%; bottom: 150px; transform: translateX(-50%); width: 280px; height: 14px; padding: 0; overflow: hidden; display: none; }
   #bar i { display: block; height: 100%; width: 0; background: #ff5fa2; }
@@ -25,6 +28,13 @@
   #start button { font-size: 20px; padding: 12px 40px; border-radius: 12px; border: 0; background: #ff5fa2; color: #fff; cursor: pointer; font-weight: 700; }
   #start a { color: #9ad; }
   #start small { color: #889; max-width: 620px; line-height: 1.6; }
+  @media (max-width: 600px) {
+    #hud { left: 8px; top: 8px; font-size: 13px; min-width: 0; padding: 7px 10px; line-height: 1.5; }
+    #help { left: 8px; right: 8px; max-width: none; font-size: 12px; }
+    #toast { top: auto; bottom: 170px; font-size: 14px; max-width: 88vw; white-space: normal; text-align: center; }
+    #prompt { font-size: 14px; max-width: 92vw; white-space: normal; text-align: center; bottom: 60px; }
+    #bar { bottom: 104px; }
+  }
 </style>
 </head>
 <body>
@@ -33,6 +43,7 @@
 <div class="panel" id="toast"></div>
 <div class="panel" id="prompt"></div>
 <div class="panel" id="bar"><i></i></div>
+<button id="helpBtn" type="button" aria-label="操作説明">?</button>
 <div class="panel" id="help">
   WASD：移動　←→：カメラ回転　ドラッグ：カメラ回転　ホイール：ズーム<br>
   E：拾う・置く・購入・リバース（長押しで盗む）　F：パンチ（盗人を撃退）<br>
@@ -703,9 +714,11 @@ function frame(now) {
   for (let k = 0; k < 4; k++) spawnBelt(BELT_X0 + k * 20);
   S.beltT = 1;
   S.t = 0;
+  $('helpBtn').addEventListener('click', () => { $('help').classList.toggle('show'); });
   $('go').addEventListener('click', () => {
     S.started = true;
     $('start').style.display = 'none';
+    $('helpBtn').classList.add('show');
     toast('ようこそ！ まずはベルトのキャラを買おう');
   });
   requestAnimationFrame(frame);
