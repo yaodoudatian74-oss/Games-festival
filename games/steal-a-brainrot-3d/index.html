@@ -46,7 +46,8 @@
   <button id="go">スタート</button>
   <small>※ このゲームは、Roblox「Steal a Brainrot」の遊びの流れ（買う・盗む・置く・守る・リバース）を参考に、
      このリポジトリ独自に作った作品です。キャラクター名はネットミーム由来で、3Dモデル・数値・コードは独自実装です。</small>
-  <a href="../../index.html">← 一覧に戻る</a>
+  <a id="backlink" href="../../index.html">← 一覧に戻る</a>
+  <script>if (window.top !== window.self) document.getElementById("backlink").hidden = true;</script>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>

@@ -1,0 +1,110 @@
+<meta charset="utf-8">
+<title>ブレインロット・アーケード</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="shared/brainrot.css">
+<style>
+  button.card { width: 100%; font: inherit; color: var(--text); background: var(--panel); text-align: left; cursor: pointer; }
+  .topbar { display: flex; align-items: center; gap: 12px; padding: 12px 0; flex-wrap: wrap; }
+  .topbar button { font: inherit; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--accent); cursor: pointer; }
+  .topbar h1 { font-size: 18px; }
+  #view { display: none; }
+  #view.open { display: block; }
+  #hub.hide { display: none; }
+  #flagFrame { width: 100%; height: min(78vh, 720px); border: 0; border-radius: 12px; background: #0d1020; display: block; }
+  .wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); max-width: 1100px; margin: 0 auto; }
+  main.play { padding: 0; }
+  canvas#c { margin: 0 auto; }
+</style>
+<div class="wrap">
+  <header>
+    <h1>🧠 ブレインロット・アーケード</h1>
+    <span class="muted">全41本（本格3D 1本 ＋ シリーズ40選）</span>
+  </header>
+
+  <main class="hub" id="hub">
+    <section class="flagship">
+      <h2>★ 本格3Dゲーム</h2>
+      <div class="grid" id="flag"></div>
+    </section>
+    <section>
+      <h2>ブレインロットシリーズ 40選</h2>
+      <div class="grid" id="list"></div>
+    </section>
+    <p class="muted">※キャラクター名はネットミームに由来する名称で、ゲームの仕組みはこの作品独自の実装です（Roblox作品のアセット・コードは使用していません）。</p>
+  </main>
+
+  <div id="view">
+    <div class="topbar">
+      <button id="back" type="button">← 一覧に戻る</button>
+      <h1 id="vtitle"></h1>
+    </div>
+    <main class="play" id="playArea"></main>
+  </div>
+</div>
+
+<script src="shared/manifest.js"></script>
+<script src="shared/brainrot.js"></script>
+<script>
+(function () {
+  const hub = document.getElementById('hub');
+  const view = document.getElementById('view');
+  const vtitle = document.getElementById('vtitle');
+  const playArea = document.getElementById('playArea');
+  const loaded = {};      // 読み込み済みのゲームスクリプト
+  let destroyCurrent = null;
+
+  const makeCard = (m) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'card';
+    b.style.setProperty('--c', m.color);
+    const em = document.createElement('span'); em.className = 'em'; em.textContent = m.emoji;
+    const t = document.createElement('b');
+    t.textContent = (m.no ? String(m.no).padStart(2, '0') + '. ' : '') + m.title;
+    const s = document.createElement('small'); s.textContent = m.genre;
+    b.append(em, t, s);
+    b.addEventListener('click', () => open(m));
+    return b;
+  };
+  BR_MANIFEST.filter((m) => m.flagship).forEach((m) => document.getElementById('flag').appendChild(makeCard(m)));
+  BR_MANIFEST.filter((m) => !m.flagship).forEach((m) => document.getElementById('list').appendChild(makeCard(m)));
+
+  function open(m) {
+    stop();
+    hub.classList.add('hide');
+    view.classList.add('open');
+    vtitle.textContent = (m.no ? String(m.no).padStart(2, '0') + '. ' : '') + m.title;
+    if (m.flagship) {
+      const f = document.createElement('iframe');
+      f.id = 'flagFrame';
+      f.title = m.title;
+      f.src = m.href;
+      playArea.appendChild(f);
+      return;
+    }
+    const c = document.createElement('canvas');
+    c.id = 'c';
+    c.setAttribute('aria-label', m.title);
+    playArea.appendChild(c);
+    const start = () => { destroyCurrent = BR.mount(c, m.id); };
+    if (loaded[m.id]) return start();
+    const s = document.createElement('script');
+    s.src = 'games/' + m.id + '.js';
+    s.onload = () => { loaded[m.id] = true; start(); };
+    s.onerror = () => { vtitle.textContent = '読み込みに失敗しました'; };
+    document.body.appendChild(s);
+  }
+
+  function stop() {
+    if (destroyCurrent) { destroyCurrent(); destroyCurrent = null; }
+    playArea.textContent = '';
+  }
+
+  document.getElementById('back').addEventListener('click', () => {
+    stop();
+    view.classList.remove('open');
+    hub.classList.remove('hide');
+    window.scrollTo(0, 0);
+  });
+})();
+</script>

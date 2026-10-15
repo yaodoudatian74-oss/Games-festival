@@ -78,22 +78,25 @@
     };
     const setPtr = (p) => Object.assign(ptr, toLogical(p));
 
-    canvas.addEventListener('mousemove', (e) => setPtr(e));
-    canvas.addEventListener('mousedown', (e) => { setPtr(e); ptr.down = true; ptr.clicked = true; });
+    // 全リスナーを1つの AbortController で管理し、destroy() で一括解除する
+    const ac = new AbortController();
+    const sig = { signal: ac.signal };
+    canvas.addEventListener('mousemove', (e) => setPtr(e), sig);
+    canvas.addEventListener('mousedown', (e) => { setPtr(e); ptr.down = true; ptr.clicked = true; }, sig);
     canvas.addEventListener('touchstart', (e) => {
       e.preventDefault(); setPtr(e.touches[0]); ptr.down = true; ptr.clicked = true;
-    }, { passive: false });
-    canvas.addEventListener('touchmove', (e) => { e.preventDefault(); setPtr(e.touches[0]); }, { passive: false });
-    window.addEventListener('mouseup', () => { ptr.down = false; });
-    window.addEventListener('touchend', () => { ptr.down = false; });
+    }, { passive: false, signal: ac.signal });
+    canvas.addEventListener('touchmove', (e) => { e.preventDefault(); setPtr(e.touches[0]); }, { passive: false, signal: ac.signal });
+    window.addEventListener('mouseup', () => { ptr.down = false; }, sig);
+    window.addEventListener('touchend', () => { ptr.down = false; }, sig);
     window.addEventListener('keydown', (e) => {
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
       if (!down[e.code]) tapped[e.code] = true;
       down[e.code] = true;
       if (e.key.length === 1) I.chars.push(e.key);
       else if (e.code === 'Backspace') I.chars.push('\b');
-    });
-    window.addEventListener('keyup', (e) => { down[e.code] = false; });
+    }, sig);
+    window.addEventListener('keyup', (e) => { down[e.code] = false; }, sig);
 
     const drawTitle = () => {
       const grd = g.createLinearGradient(0, 0, W, H);
@@ -116,7 +119,9 @@
       if (sub2) text(g, sub2, W / 2, H / 2 + 52, 17, '#ddd', 'center');
     };
 
+    let alive = true;
     const frame = (now) => {
+      if (!alive) return;
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       I.dx = (I.held('ArrowRight', 'KeyD') ? 1 : 0) - (I.held('ArrowLeft', 'KeyA') ? 1 : 0);
@@ -157,6 +162,13 @@
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
+    return function destroy() {
+      alive = false;
+      ac.abort();
+      for (const k of Object.keys(down)) delete down[k];
+      for (const k of Object.keys(tapped)) delete tapped[k];
+      I.chars.length = 0;
+    };
   }
 
   BR.mount = mount;
