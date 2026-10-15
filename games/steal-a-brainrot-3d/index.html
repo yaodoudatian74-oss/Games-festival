@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ブレインロットを盗め3D | ブレインロット・アーケード</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d18; color: #fff; user-select: none;
+    font-family: "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif; }
+  canvas#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+  canvas#c:active { cursor: grabbing; }
+  .panel { position: fixed; background: rgba(0,0,0,.6); border-radius: 12px; padding: 10px 14px; pointer-events: none; }
+  #hud { left: 12px; top: 12px; font-size: 15px; line-height: 1.7; min-width: 230px; }
+  #hud b { color: #ffe066; }
+  #hud .warn { color: #ff8a8a; font-weight: 700; }
+  #help { right: 12px; bottom: 12px; font-size: 13px; line-height: 1.6; max-width: 340px; }
+  #prompt { left: 50%; bottom: 96px; transform: translateX(-50%); font-size: 17px; font-weight: 700; display: none; white-space: nowrap; }
+  #bar { left: 50%; bottom: 150px; transform: translateX(-50%); width: 280px; height: 14px; padding: 0; overflow: hidden; display: none; }
+  #bar i { display: block; height: 100%; width: 0; background: #ff5fa2; }
+  #toast { left: 50%; top: 16px; transform: translateX(-50%); font-size: 17px; opacity: 0; transition: opacity .3s; white-space: nowrap; }
+  #start { position: fixed; inset: 0; background: rgba(5,6,14,.88); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px; }
+  #start h1 { font-size: 40px; margin: 0; color: #ffe066; }
+  #start p { max-width: 620px; line-height: 1.8; margin: 0; color: #dde; }
+  #start button { font-size: 20px; padding: 12px 40px; border-radius: 12px; border: 0; background: #ff5fa2; color: #fff; cursor: pointer; font-weight: 700; }
+  #start a { color: #9ad; }
+  #start small { color: #889; max-width: 620px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="panel" id="hud"></div>
+<div class="panel" id="toast"></div>
+<div class="panel" id="prompt"></div>
+<div class="panel" id="bar"><i></i></div>
+<div class="panel" id="help">
+  WASD：移動　←→：カメラ回転　ドラッグ：カメラ回転　ホイール：ズーム<br>
+  E：拾う・置く・購入・リバース（長押しで盗む）　F：パンチ（盗人を撃退）<br>
+  1 / 2：ショップ（シールド / スピード）　Esc：一時停止
+</div>
+<div id="start">
+  <h1>ブレインロットを盗め3D</h1>
+  <p>ベルトコンベアから🧠キャラを買って、自分の基地の台座に置くと毎秒お金が入ります。
+     ライバルの基地のキャラを長押しで盗むこともできます。ライバルも、あなたの基地を狙ってきます。
+     お金を貯めて「リバース」すると収入が増えて、台座も増えます。</p>
+  <button id="go">スタート</button>
+  <small>※ このゲームは、Roblox「Steal a Brainrot」の遊びの流れ（買う・盗む・置く・守る・リバース）を参考に、
+     このリポジトリ独自に作った作品です。キャラクター名はネットミーム由来で、3Dモデル・数値・コードは独自実装です。</small>
+  <a href="../../index.html">← 一覧に戻る</a>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+'use strict';
+
+/* ---------- 定数・データ ---------- */
+const RARITY = [
+  { name: 'コモン', color: 0x9aa4b8, cost: 150, inc: 2, weight: 40 },
+  { name: 'レア', color: 0x4cc9f0, cost: 800, inc: 12, weight: 25 },
+  { name: 'エピック', color: 0xb388ff, cost: 4000, inc: 60, weight: 15 },
+  { name: 'レジェンド', color: 0xffd166, cost: 25000, inc: 300, weight: 10 },
+  { name: 'ミシック', color: 0xff6b6b, cost: 150000, inc: 2000, weight: 6 },
+  { name: 'ブレインロット神', color: 0x06d6a0, cost: 1000000, inc: 15000, weight: 3 },
+  { name: 'シークレット', color: 0xff00ff, cost: 10000000, inc: 150000, weight: 1 },
+];
+// r: レア度の添字 / shape: 見た目の形
+const CHARS = [
+  { name: 'Noobini Pizzanini', r: 0, shape: 'sphere' },
+  { name: 'Lirili Larila', r: 0, shape: 'cone' },
+  { name: 'Tralalero Tralala', r: 1, shape: 'box' },
+  { name: 'Bombardiro Crocodilo', r: 1, shape: 'box' },
+  { name: 'Tung Tung Tung Sahur', r: 2, shape: 'cyl' },
+  { name: 'Chimpanzini Bananini', r: 2, shape: 'sphere' },
+  { name: 'Ballerina Cappuccina', r: 3, shape: 'cone' },
+  { name: 'Glorbo Fruttodrillo', r: 3, shape: 'cyl' },
+  { name: 'Svinina Bombardino', r: 4, shape: 'box' },
+  { name: 'Frigo Camelo', r: 4, shape: 'sphere' },
+  { name: 'Odin Din Din Dun', r: 5, shape: 'cone' },
+  { name: 'Dragon Cannelloni', r: 6, shape: 'cyl' },
+];
+const SHOP = [
+  { name: 'シールド（30秒・盗み防止）', cost: 500 },
+  { name: 'スピード（20秒・1.6倍）', cost: 300 },
+];
+const BASE = { x: 0, z: 24 };
+const BELT_Z = -12, BELT_X0 = -42, BELT_X1 = 42, BELT_SPEED = 3.2;
+const SHOP_POS = { x: -22, z: 6 };
+const ALTAR_POS = { x: 22, z: 6 };
+const BASES = [{ x: -72, z: -44 }, { x: 72, z: -44 }, { x: -80, z: 42 }, { x: 80, z: 42 }];
+const WORLD = { x: 88, zMin: -62, zMax: 60 };
+const SAVE_KEY = 'brainrot3d-save-v1';
+const START_MONEY = 300;
+
+/* ---------- ユーティリティ ---------- */
+const $ = (id) => document.getElementById(id);
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const fmt = (n) => {
+  const units = [['T', 1e12], ['B', 1e9], ['M', 1e6], ['K', 1e3]];
+  for (const [s, v] of units) if (n >= v) return (n / v).toFixed(n / v < 10 ? 2 : 1) + s;
+  return String(Math.floor(n));
+};
+const detach = (o) => { if (o && o.parent) o.parent.remove(o); };
+const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const pickIdx = () => {
+  const total = RARITY.reduce((s, r) => s + r.weight, 0);
+  let roll = Math.random() * total, rarity = 0;
+  for (let i = 0; i < RARITY.length; i++) { roll -= RARITY[i].weight; if (roll <= 0) { rarity = i; break; } }
+  const list = CHARS.map((c, i) => i).filter((i) => CHARS[i].r === rarity);
+  return list[Math.floor(Math.random() * list.length)];
+};
+
+/* ---------- レンダラー・シーン ---------- */
+const canvas = $('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fe2ff);
+scene.fog = new THREE.Fog(0x9fe2ff, 110, 260);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 400);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3d6b35, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(40, 70, 25);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 1, far: 220 });
+sun.shadow.camera.updateProjectionMatrix();
+scene.add(sun);
+
+const mat = (color, rough = 0.7) => new THREE.MeshStandardMaterial({ color, roughness: rough });
+const addBox = (w, h, d, color, x, y, z) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
+  m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; scene.add(m); return m;
+};
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), mat(0x6cc76a));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+addBox(60, 0.05, 40, 0x7fd47a, 0, 0.03, -2);
+
+// 木（遠景）
+for (let i = 0; i < 46; i++) {
+  let x, z;
+  do { x = rand(-115, 115); z = rand(-115, 115); } while (Math.abs(x) < 92 && z > -68 && z < 66);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 2, 8), mat(0x8b5a2b));
+  trunk.position.set(x, 1, z); trunk.castShadow = true; scene.add(trunk);
+  const top = new THREE.Mesh(new THREE.ConeGeometry(2.2, 4.5, 10), mat(0x2f7d32));
+  top.position.set(x, 4.2, z); top.castShadow = true; scene.add(top);
+}
+
+// 中央の道（プレイヤー基地とベルトコンベア）
+addBox(84, 0.8, 4, 0x4a4e69, 0, 0.4, BELT_Z);
+addBox(84, 0.2, 0.4, 0xffd166, 0, 0.9, BELT_Z + 2.1);
+addBox(84, 0.2, 0.4, 0xffd166, 0, 0.9, BELT_Z - 2.1);
+addBox(34, 0.6, 18, 0xf4e1c1, BASE.x, 0.3, BASE.z);
+
+// ショップ・祭壇
+addBox(6, 3, 4, 0xff9f1c, SHOP_POS.x, 1.5, SHOP_POS.z);
+addBox(7.5, 0.5, 5.5, 0xe63946, SHOP_POS.x, 3.2, SHOP_POS.z);
+const altar = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3, 2.4, 24), mat(0xc77dff));
+altar.position.set(ALTAR_POS.x, 1.2, ALTAR_POS.z); altar.castShadow = true; scene.add(altar);
+
+// ライバル基地
+BASES.forEach((b) => {
+  addBox(22, 0.5, 14, 0xd8c7a6, b.x, 0.25, b.z);
+  addBox(22, 0.3, 0.5, 0x8d6e63, b.x, 0.5, b.z - 7);
+});
+
+/* ---------- ラベル（文字のスプライト） ---------- */
+const labelCache = new Map();
+function makeLabel(text) {
+  let tex = labelCache.get(text);
+  if (!tex) {
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 96;
+    const x = c.getContext('2d');
+    x.fillStyle = 'rgba(0,0,0,0.6)';
+    x.beginPath(); x.roundRect(6, 10, 500, 76, 22); x.fill();
+    x.fillStyle = '#fff';
+    x.font = 'bold 30px "Hiragino Sans","Noto Sans JP",sans-serif';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(text, 256, 49);
+    tex = new THREE.CanvasTexture(c);
+    labelCache.set(text, tex);
+  }
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sp.scale.set(3.6, 0.68, 1);
+  return sp;
+}
+addLabel('ショップ（1 / 2 キー）', SHOP_POS.x, 4.8, SHOP_POS.z);
+addLabel('リバース祭壇（E）', ALTAR_POS.x, 4.6, ALTAR_POS.z);
+addLabel('ライバル基地', BASES[0].x, 4, BASES[0].z - 6);
+addLabel('ライバル基地', BASES[1].x, 4, BASES[1].z - 6);
+addLabel('ライバル基地', BASES[2].x, 4, BASES[2].z + 6);
+addLabel('ライバル基地', BASES[3].x, 4, BASES[3].z + 6);
+function addLabel(text, x, y, z) {
+  const s = makeLabel(text); s.position.set(x, y, z); scene.add(s); return s;
+}
+
+/* ---------- キャラクター模型 ---------- */
+function makeItem(idx) {
+  const c = CHARS[idx], rar = RARITY[c.r];
+  const g = new THREE.Group();
+  const m = mat(rar.color, 0.45);
+  let geo;
+  if (c.shape === 'box') geo = new THREE.BoxGeometry(0.9, 1.1, 0.9);
+  else if (c.shape === 'sphere') geo = new THREE.SphereGeometry(0.6, 20, 14);
+  else if (c.shape === 'cone') geo = new THREE.ConeGeometry(0.6, 1.4, 16);
+  else geo = new THREE.CylinderGeometry(0.45, 0.5, 1.3, 16);
+  const body = new THREE.Mesh(geo, m);
+  body.position.y = 1.1; body.castShadow = true; g.add(body);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  [-0.22, 0.22].forEach((x) => {
+    const e = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), eyeMat);
+    e.position.set(x, 1.3, 0.5); g.add(e);
+  });
+  const tag = makeLabel(c.name);
+  tag.position.y = 2.8; g.add(tag);
+  g.userData.idx = idx;
+  return g;
+}
+
+function makeBot(name, home) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 1.2, 14), mat(0x8ecae6));
+  body.position.y = 0.6; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 14, 10), mat(0xffe8d6));
+  head.position.y = 1.6; head.castShadow = true; g.add(head);
+  const tag = makeLabel(name); tag.position.y = 2.5; g.add(tag);
+  scene.add(g);
+  const hb = BASES[home];
+  g.position.set(hb.x, 0, hb.z + 7);
+  return { name, home, g, x: hb.x, z: hb.z + 7, state: 'idle', timer: rand(10, 18), target: null, prog: 0, stun: 0, carry: null, carryIdx: -1 };
+}
+
+/* ---------- プレイヤー ---------- */
+const player = { x: 0, z: 2, g: new THREE.Group(), walk: 0 };
+{
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 1.2, 16), mat(0xff7aa2));
+  body.position.y = 0.6; body.castShadow = true; player.g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), mat(0xffd6a5));
+  head.position.y = 1.6; head.castShadow = true; player.g.add(head);
+  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.46, 0.5, 16), mat(0x3a86ff));
+  hat.position.y = 2.1; hat.castShadow = true; player.g.add(hat);
+  scene.add(player.g);
+}
+
+/* ---------- ゲーム状態 ---------- */
+const own = [];   // プレイヤーの台座（12個）
+const npc = [];   // ライバル基地の台座
+const belt = [];  // ベルトコンベア上のキャラ
+const bots = [
+  { name: 'ライバルA', home: 0 },
+  { name: 'ライバルB', home: 1 },
+].map((b) => makeBot(b.name, b.home));
+const S = {
+  money: 0, rebirths: 0, shield: 0, speedT: 0, carry: null, stealT: 0,
+  paused: false, started: false, toastT: 0, saveT: 0, beltT: 0, bestIncome: 0,
+};
+
+const unlockedCount = () => Math.min(12, 6 + 2 * S.rebirths);
+const mult = () => 1 + 0.5 * S.rebirths;
+const income = () => own.reduce((sum, p) => sum + (p.idx >= 0 ? RARITY[CHARS[p.idx].r].inc : 0), 0) * mult();
+const rebirthCost = () => 20000 * (S.rebirths + 1) * (S.rebirths + 1);
+
+function makePedestal(x, z) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.3, 0.9, 20), mat(0xdedede));
+  base.position.y = 0.45; base.castShadow = base.receiveShadow = true; g.add(base);
+  g.position.set(x, 0, z); scene.add(g);
+  return { x, z, mesh: base, item: null, idx: -1, respawn: 0, locked: false };
+}
+
+function placeItem(ped, idx) {
+  if (ped.item) detach(ped.item);
+  const g = makeItem(idx);
+  g.position.set(ped.x, 0.9, ped.z);
+  scene.add(g);
+  ped.item = g; ped.idx = idx;
+}
+function clearPedestal(ped) {
+  detach(ped.item);
+  ped.item = null; ped.idx = -1;
+}
+
+for (let i = 0; i < 12; i++) {
+  own.push(makePedestal(BASE.x - 12.5 + (i % 6) * 5, i < 6 ? BASE.z - 6 : BASE.z + 6));
+}
+BASES.forEach((b) => {
+  for (let k = 0; k < 4; k++) {
+    const p = makePedestal(b.x - 7.5 + k * 5, b.z);
+    p.base = BASES.indexOf(b);
+    placeItem(p, pickIdx());
+    npc.push(p);
+  }
+});
+
+// 保護シールド（ドーム）
+const dome = new THREE.Mesh(new THREE.SphereGeometry(26, 32, 16),
+  new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.18, depthWrite: false }));
+dome.position.set(BASE.x, 0, BASE.z); dome.visible = false; scene.add(dome);
+
+function updateLocks() {
+  const n = unlockedCount();
+  own.forEach((p, i) => {
+    const locked = i >= n;
+    p.mesh.material.color.set(locked ? 0x555566 : 0xdedede);
+    p.locked = locked;
+    if (locked && p.item) { clearPedestal(p); }
+  });
+}
+
+/* ---------- 保存・読込 ---------- */
+function save() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ money: S.money, rebirths: S.rebirths, own: own.map((p) => p.idx) }));
+  } catch (e) { /* 保存できない環境では無視 */ }
+}
+function load() {
+  try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { return null; }
+}
+
+/* ---------- 入力 ---------- */
+const keys = Object.create(null);
+const tapped = Object.create(null);
+let yaw = 0, camDist = 13, dragging = false;
+addEventListener('keydown', (e) => {
+  if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  if (!keys[e.code]) tapped[e.code] = true;
+  keys[e.code] = true;
+  if (e.code === 'Escape' && S.started) togglePause();
+});
+addEventListener('keyup', (e) => { keys[e.code] = false; });
+canvas.addEventListener('pointerdown', () => { dragging = true; });
+addEventListener('pointerup', () => { dragging = false; });
+addEventListener('pointermove', (e) => { if (dragging) yaw -= e.movementX * 0.006; });
+canvas.addEventListener('wheel', (e) => { camDist = clamp(camDist + e.deltaY * 0.01, 7, 22); }, { passive: true });
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+});
+addEventListener('beforeunload', save);
+
+/* ---------- UI ---------- */
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg; t.style.opacity = 1; S.toastT = 2.4;
+}
+function togglePause() {
+  S.paused = !S.paused;
+  toast(S.paused ? '一時停止中（Escで再開）' : '再開');
+}
+function showPrompt(text) {
+  const p = $('prompt');
+  if (text) { p.textContent = text; p.style.display = 'block'; } else p.style.display = 'none';
+}
+
+/* ---------- ベルトコンベア ---------- */
+function spawnBelt(x) {
+  const idx = pickIdx();
+  const g = makeItem(idx);
+  g.scale.setScalar(0.85);
+  g.position.set(x, 0.9, BELT_Z);
+  scene.add(g);
+  belt.push({ idx, g, x });
+}
+
+/* ---------- 対象の検出 ---------- */
+function findTarget() {
+  const cands = [];
+  const add = (type, x, z, range, extra) => {
+    const d = Math.hypot(player.x - x, player.z - z);
+    if (d <= range) cands.push({ type, d, ...extra });
+  };
+  if (!S.carry) belt.forEach((it) => add('belt', it.x, BELT_Z, 3.2, { it }));
+  own.forEach((p, i) => { if (i < unlockedCount()) add('own', p.x, p.z, 3.2, { p }); });
+  if (!S.carry) npc.forEach((p) => { if (p.item) add('npc', p.x, p.z, 3.2, { p }); });
+  add('shop', SHOP_POS.x, SHOP_POS.z, 4.5, {});
+  add('altar', ALTAR_POS.x, ALTAR_POS.z, 4.5, {});
+  cands.sort((a, b) => a.d - b.d);
+  return cands[0] || null;
+}
+
+function promptFor(t) {
+  if (!t) return '';
+  if (t.type === 'belt') {
+    const c = CHARS[t.it.idx];
+    return `E：${c.name}（${RARITY[c.r].name}）を ${fmt(RARITY[c.r].cost)} で購入`;
+  }
+  if (t.type === 'own') {
+    if (t.p.item && S.carry) return 'E：置き換える';
+    if (t.p.item) return 'E：持ち上げる';
+    if (S.carry) return 'E：台座に置く（収入が入る）';
+    return '';
+  }
+  if (t.type === 'npc') return '長押しE：盗む（3秒）';
+  if (t.type === 'shop') return '1：シールド（500）　2：スピード（300）';
+  if (t.type === 'altar') return `E：リバース（必要金額 ${fmt(rebirthCost())}）`;
+  return '';
+}
+
+function act(t) {
+  if (!t) return;
+  if (t.type === 'belt') {
+    const cost = RARITY[CHARS[t.it.idx].r].cost;
+    if (S.carry) { toast('すでに持っています'); return; }
+    if (S.money < cost) { toast('お金が足りません'); return; }
+    S.money -= cost;
+    belt.splice(belt.indexOf(t.it), 1);
+    t.it.g.scale.setScalar(0.65);
+    S.carry = { idx: t.it.idx, g: t.it.g };
+    toast(`${CHARS[t.it.idx].name} をゲット！ 台座へ運ぼう`);
+  } else if (t.type === 'own') {
+    const p = t.p;
+    if (p.locked) return;
+    if (p.item && !S.carry) {
+      S.carry = { idx: p.idx, g: p.item };
+      p.item.scale.setScalar(0.65);
+      p.item = null; p.idx = -1;
+      toast('持ち上げました');
+    } else if (!p.item && S.carry) {
+      placeOwn(p, S.carry);
+      S.carry = null;
+      toast('台座に置きました（収入UP）');
+    } else if (p.item && S.carry) {
+      const old = { idx: p.idx, g: p.item };
+      placeOwn(p, S.carry);
+      old.g.scale.setScalar(0.65);
+      S.carry = old;
+      toast('入れ替えました');
+    }
+  } else if (t.type === 'altar') {
+    const cost = rebirthCost();
+    if (S.money < cost) { toast(`リバースにはあと ${fmt(cost - S.money)} 必要`); return; }
+    S.rebirths++;
+    S.money = 0;
+    own.forEach((p) => { if (p.item) clearPedestal(p); });
+    if (S.carry) { detach(S.carry.g); S.carry = null; }
+    updateLocks();
+    toast(`リバース！ 収入 ×${mult().toFixed(1)}、台座が増えた`);
+  } else if (t.type === 'npc') {
+    toast('長押しで盗みます（Eを押し続ける）');
+  }
+}
+function placeOwn(p, carry) {
+  detach(carry.g);
+  carry.g.scale.setScalar(1);
+  carry.g.position.set(p.x, 0.9, p.z);
+  scene.add(carry.g);
+  p.item = carry.g; p.idx = carry.idx;
+}
+
+function buyShop(i) {
+  const it = SHOP[i];
+  if (S.money < it.cost) { toast('お金が足りません'); return; }
+  S.money -= it.cost;
+  if (i === 0) S.shield = 30; else S.speedT = 20;
+  toast(`${it.name} を購入！`);
+}
+
+/* ---------- ライバル（ボット） ---------- */
+function moveTo(obj, tx, tz, speed, dt, stop) {
+  const dx = tx - obj.x, dz = tz - obj.z;
+  const d = Math.hypot(dx, dz);
+  if (d <= stop) return true;
+  const step = Math.min(d, speed * dt);
+  obj.x += dx / d * step; obj.z += dz / d * step;
+  obj.g.position.set(obj.x, 0, obj.z);
+  obj.g.rotation.y = Math.atan2(dx, dz);
+  return false;
+}
+
+function updateBot(b, dt) {
+  if (b.stun > 0) {
+    b.stun -= dt;
+    if (b.stun <= 0) b.state = 'idle';
+    return;
+  }
+  if (b.state === 'idle') {
+    b.timer -= dt;
+    if (b.timer > 0) return;
+    const targets = own.filter((p, i) => p.item && i < unlockedCount());
+    if (targets.length && S.shield <= 0) {
+      b.target = targets[Math.floor(Math.random() * targets.length)];
+      b.state = 'goto';
+      toast(`⚠ ${b.name}があなたの基地を狙っている！`);
+    } else {
+      b.timer = rand(12, 20);
+    }
+  } else if (b.state === 'goto') {
+    if (!b.target.item || S.shield > 0) { b.state = 'idle'; b.timer = rand(12, 20); return; }
+    if (moveTo(b, b.target.x, b.target.z, 5.5, dt, 1.6)) { b.state = 'steal'; b.prog = 0; }
+  } else if (b.state === 'steal') {
+    if (!b.target.item || S.shield > 0) { b.state = 'idle'; b.timer = rand(12, 20); return; }
+    b.prog += dt;
+    if (b.prog >= 4) {
+      b.carryIdx = b.target.idx;
+      b.carry = b.target.item;
+      b.target.item = null; b.target.idx = -1;
+      b.carry.scale.setScalar(0.6);
+      b.carry.position.set(0, 2.9, 0);
+      b.g.add(b.carry);
+      b.state = 'flee';
+      toast(`🚨 ${b.name}が盗んだ！ 取り返すならパンチ（F）`);
+    }
+  } else if (b.state === 'flee') {
+    const hb = BASES[b.home];
+    if (moveTo(b, hb.x, hb.z, 6.5, dt, 2.5)) {
+      const slot = npc.find((p) => p.base === b.home && !p.item);
+      if (slot && b.carry) {
+        scene.add(b.carry);
+        b.carry.scale.setScalar(1);
+        b.carry.position.set(slot.x, 0.9, slot.z);
+        slot.item = b.carry; slot.idx = b.carryIdx;
+      } else {
+        detach(b.carry);
+      }
+      b.carry = null; b.carryIdx = -1;
+      b.state = 'idle'; b.timer = rand(20, 35);
+    }
+  }
+}
+
+function punch(b) {
+  b.stun = 2;
+  b.state = 'stunned';
+  toast(`${b.name}をパンチ！`);
+  if (!b.carry) return;
+  const slot = own.find((p, i) => i < unlockedCount() && !p.item);
+  if (slot) {
+    placeOwn(slot, { idx: b.carryIdx, g: b.carry });
+    toast('取り返した！ 台座に戻しました');
+  } else if (!S.carry) {
+    S.carry = { idx: b.carryIdx, g: b.carry };
+    b.carry.scale.setScalar(0.65);
+    b.carry.position.set(0, 0, 0);
+    scene.add(b.carry);
+    toast('取り返した！ 持ち物に入れました');
+  } else {
+    detach(b.carry);
+    toast('取り返せませんでした…');
+  }
+  b.carry = null; b.carryIdx = -1;
+}
+
+/* ---------- 更新 ---------- */
+function update(dt) {
+  // カメラ回転（矢印キー）
+  if (keys.ArrowLeft) yaw += 2 * dt;
+  if (keys.ArrowRight) yaw -= 2 * dt;
+
+  // 移動（カメラ基準）
+  const fwd = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
+  const strafe = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+  const rx = Math.cos(yaw), rz = -Math.sin(yaw);
+  let vx = fx * fwd + rx * strafe, vz = fz * fwd + rz * strafe;
+  const len = Math.hypot(vx, vz);
+  const speed = 7 * (S.speedT > 0 ? 1.6 : 1) * (S.carry ? 0.8 : 1);
+  if (len > 0) {
+    vx /= len; vz /= len;
+    player.x = clamp(player.x + vx * speed * dt, -WORLD.x, WORLD.x);
+    player.z = clamp(player.z + vz * speed * dt, WORLD.zMin, WORLD.zMax);
+    player.g.rotation.y = Math.atan2(vx, vz);
+    player.walk += dt * speed;
+  }
+  player.g.position.set(player.x, Math.abs(Math.sin(player.walk * 1.6)) * (len > 0 ? 0.15 : 0), player.z);
+
+  // 持ち物の位置
+  if (S.carry) S.carry.g.position.set(player.x, 3.4 + Math.sin(S.t * 4) * 0.1, player.z);
+
+  // ベルトコンベア
+  for (const it of belt) {
+    it.x += BELT_SPEED * dt;
+    it.g.position.x = it.x;
+  }
+  for (const it of belt) if (it.x > BELT_X1) detach(it.g);
+  belt.splice(0, belt.length, ...belt.filter((v) => v.x <= BELT_X1));
+  S.beltT -= dt;
+  if (S.beltT <= 0 && belt.length < 7) { spawnBelt(BELT_X0); S.beltT = rand(1.6, 2.6); }
+
+  // ライバル基地の台座（空いたら補充）
+  for (const p of npc) {
+    if (!p.item) { p.respawn -= dt; if (p.respawn <= 0) placeItem(p, pickIdx()); }
+  }
+
+  // 対象と操作
+  const target = findTarget();
+  showPrompt(promptFor(target) || (nearPunch() ? 'F：パンチ' : ''));
+  const bar = $('bar');
+  if (keys.KeyE && target && target.type === 'npc' && !S.carry) {
+    S.stealT += dt;
+    bar.style.display = 'block';
+    bar.firstElementChild.style.width = clamp(S.stealT / 3, 0, 1) * 100 + '%';
+    if (S.stealT >= 3) {
+      const p = target.p;
+      S.carry = { idx: p.idx, g: p.item };
+      p.item.scale.setScalar(0.65);
+      p.item = null; p.idx = -1; p.respawn = 25;
+      S.stealT = 0;
+      bar.style.display = 'none';
+      toast('盗んだ！ 基地に運ぼう');
+    }
+  } else {
+    S.stealT = 0;
+    bar.style.display = 'none';
+  }
+  if (tapped.KeyE && target) act(target);
+  if (tapped.Digit1 && Math.hypot(player.x - SHOP_POS.x, player.z - SHOP_POS.z) < 4.5) buyShop(0);
+  if (tapped.Digit2 && Math.hypot(player.x - SHOP_POS.x, player.z - SHOP_POS.z) < 4.5) buyShop(1);
+  if (tapped.KeyF) {
+    const b = bots.find((v) => dist2(v, player) < 3.2);
+    if (b) punch(b);
+  }
+
+  // ライバル
+  bots.forEach((b) => updateBot(b, dt));
+
+  // 収入
+  S.money += income() * dt;
+  S.bestIncome = Math.max(S.bestIncome, income());
+
+  // バフ・シールド
+  S.shield = Math.max(0, S.shield - dt);
+  S.speedT = Math.max(0, S.speedT - dt);
+  dome.visible = S.shield > 0;
+  if (dome.visible) dome.material.opacity = 0.14 + Math.sin(S.t * 3) * 0.04;
+
+  // 保存（5秒ごと）
+  S.saveT += dt;
+  if (S.saveT >= 5) { S.saveT = 0; save(); }
+}
+
+function nearPunch() {
+  return bots.some((b) => dist2(b, player) < 3.2);
+}
+
+/* ---------- 描画（HUD） ---------- */
+let hudT = 0;
+function drawHud(dt) {
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.2;
+  const threats = bots.filter((b) => b.state === 'steal')
+    .map((b) => `<div class="warn">⚠ ${b.name}が盗み中…</div>`).join('');
+  const shieldTxt = S.shield > 0 ? `　🛡 ${Math.ceil(S.shield)}秒` : '';
+  const speedTxt = S.speedT > 0 ? `　⚡ ${Math.ceil(S.speedT)}秒` : '';
+  const carryName = S.carry ? CHARS[S.carry.idx].name : 'なし';
+  $('hud').innerHTML =
+    `💰 <b>${fmt(S.money)}</b><br>` +
+    `📈 毎秒 <b>${fmt(income())}</b>（×${mult().toFixed(1)}）<br>` +
+    `🔁 リバース <b>${S.rebirths}</b> 回　（次は ${fmt(rebirthCost())}）<br>` +
+    `🎒 持ち物：${carryName}${shieldTxt}${speedTxt}<br>` +
+    `🏠 台座 ${own.filter((p) => p.item).length} / ${unlockedCount()} 体${threats}`;
+}
+
+/* ---------- メインループ ---------- */
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  if (S.started && !S.paused) {
+    S.t = (S.t || 0) + dt;
+    update(dt);
+  }
+  if (S.toastT > 0) { S.toastT -= dt; if (S.toastT <= 0) $('toast').style.opacity = 0; }
+  if (S.started) drawHud(dt);
+
+  // カメラ
+  const want = new THREE.Vector3(
+    player.x + Math.sin(yaw) * camDist,
+    6 + camDist * 0.22,
+    player.z + Math.cos(yaw) * camDist,
+  );
+  camera.position.lerp(want, 1 - Math.exp(-dt * 10));
+  camera.lookAt(player.x, 1.8, player.z);
+
+  renderer.render(scene, camera);
+  for (const k of Object.keys(tapped)) delete tapped[k];
+  requestAnimationFrame(frame);
+}
+
+/* ---------- 起動 ---------- */
+(function init() {
+  const d = load();
+  if (d) {
+    S.money = d.money || 0;
+    S.rebirths = d.rebirths || 0;
+    updateLocks();
+    (d.own || []).forEach((idx, i) => { if (idx >= 0 && i < unlockedCount()) placeItem(own[i], idx); });
+  } else {
+    S.money = START_MONEY;
+    updateLocks();
+  }
+  for (let k = 0; k < 4; k++) spawnBelt(BELT_X0 + k * 20);
+  S.beltT = 1;
+  S.t = 0;
+  $('go').addEventListener('click', () => {
+    S.started = true;
+    $('start').style.display = 'none';
+    toast('ようこそ！ まずはベルトのキャラを買おう');
+  });
+  requestAnimationFrame(frame);
+})();
+})();
+</script>
+</body>
+</html>
